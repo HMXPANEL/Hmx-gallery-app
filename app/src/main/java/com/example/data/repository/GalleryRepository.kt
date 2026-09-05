@@ -6,29 +6,58 @@ import com.example.data.remote.SupabaseStorageClient
 import com.example.utils.FileValidator
 import com.example.utils.SignedUrlCache
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 
+/**
+ * Appends a fetched page without duplicates. Page overlaps (retries, shifting
+ * server offsets) must never duplicate paths: duplicates would break LazyGrid
+ * key stability and trigger redundant sign-URL/thumbnail work per duplicate.
+ */
+internal fun mergeGalleryPages(
+    existing: List<GalleryItem>,
+    incoming: List<GalleryItem>
+): List<GalleryItem> {
+    if (incoming.isEmpty()) return existing
+    if (existing.isEmpty()) return incoming
+    val known = HashSet<String>(existing.size + incoming.size)
+    existing.forEach { known.add(it.path) }
+    val merged = ArrayList<GalleryItem>(existing.size + incoming.size)
+    merged.addAll(existing)
+    incoming.forEach { if (known.add(it.path)) merged.add(it) }
+    return merged
+}
+
 class GalleryRepository(
     private val storageClient: SupabaseStorageClient = SupabaseStorageClient(),
     private val signedUrlCache: SignedUrlCache = SignedUrlCache()
 ) {
-    // Coalesces concurrent signed-URL fetches for the same path (prefetch + grid race).
+    companion object {
+        // Items per page: large enough for ~2 viewports per round-trip (fewer
+        // emissions for 1,000+ galleries), small enough to stay light. The grid
+        // resolves signed URLs lazily for composed items only.
+        const val PAGE_SIZE = 60
+    }
+
+    // Coalesces concurrent signed-URL fetches for the same path (grid race).
     private val inFlightMutex = Mutex()
     private val inFlight = mutableMapOf<String, CompletableDeferred<Result<String>>>()
+    // Bounds concurrent sign-URL network calls across grid/viewer/share callers.
+    // Fast scrolling composes many items at once; without this gate each composes
+    // its own blocking OkHttp call (thread/GC pressure -> dropped frames).
+    // Queued waiters suspend in cancellable withPermit, so items that leave the
+    // viewport abandon the queue instead of firing wasted requests.
+    private val signSemaphore = Semaphore(8)
     /**
      * Lists gallery files with pagination, sorting by updated_at desc.
-     * Matches web: requests limit = itemsPerPage + 1 (31) to determine if more items exist.
+     * Matches web: requests limit = itemsPerPage + 1 to determine if more items exist.
      */
     suspend fun listGalleryFiles(
         galleryName: String,
         page: Int = 0,
-        itemsPerPage: Int = 30
+        itemsPerPage: Int = PAGE_SIZE
     ): Result<Pair<List<GalleryItem>, Boolean>> {
         val offset = page * itemsPerPage
         val limit = itemsPerPage + 1
@@ -91,7 +120,10 @@ class GalleryRepository(
         if (!isOwner) return waiter.await()
 
         try {
-            val result = storageClient.createSignedUrl(filePath, expiresIn)
+            // Gated: bounds total concurrent sign requests during scroll bursts.
+            val result = signSemaphore.withPermit {
+                storageClient.createSignedUrl(filePath, expiresIn)
+            }
             result.onSuccess { url -> signedUrlCache.put(filePath, url, expiresIn) }
             waiter.complete(result)
             return result
@@ -102,23 +134,6 @@ class GalleryRepository(
         } finally {
             inFlightMutex.withLock { inFlight.remove(filePath) }
         }
-    }
-
-    /**
-     * Prefetches signed URLs for a collection of gallery items concurrently.
-     * Throttled to avoid firing ~30 parallel POSTs per page (network storm).
-     */
-    suspend fun prefetchSignedUrls(items: List<GalleryItem>) = coroutineScope {
-        val semaphore = Semaphore(6)
-        items.map { item ->
-            async {
-                semaphore.withPermit {
-                    if (signedUrlCache.get(item.path) == null) {
-                        getSignedUrl(item.path)
-                    }
-                }
-            }
-        }.awaitAll()
     }
 
     /**

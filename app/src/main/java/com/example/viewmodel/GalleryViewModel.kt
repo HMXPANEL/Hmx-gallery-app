@@ -6,10 +6,10 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.model.GalleryItem
 import com.example.data.preferences.GalleryPreferences
 import com.example.data.remote.SupabaseConfig
 import com.example.data.repository.GalleryRepository
+import com.example.data.repository.mergeGalleryPages
 import com.example.utils.FileValidator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -120,11 +120,18 @@ class GalleryViewModel @JvmOverloads constructor(
             }
 
             val pageToFetch = if (clear) 0 else _uiState.value.currentPage
-            val result = repository.listGalleryFiles(gallery, page = pageToFetch, itemsPerPage = 30)
+            val result = repository.listGalleryFiles(
+                gallery,
+                page = pageToFetch,
+                itemsPerPage = GalleryRepository.PAGE_SIZE
+            )
 
             result.fold(
                 onSuccess = { (newFiles, hasMore) ->
-                    val updatedList = if (clear) newFiles else _uiState.value.galleryItems + newFiles
+                    // Refresh replaces with page 0; pagination appends (deduped).
+                    // Signed URLs resolve lazily for composed grid items only —
+                    // never prefetched for off-screen pages.
+                    val updatedList = if (clear) newFiles else mergeGalleryPages(_uiState.value.galleryItems, newFiles)
                     _uiState.update {
                         it.copy(
                             galleryItems = updatedList,
@@ -133,10 +140,6 @@ class GalleryViewModel @JvmOverloads constructor(
                             isRefreshing = false,
                             isLoadingMore = false
                         )
-                    }
-                    // Prefetch signed URLs in parallel for new files
-                    viewModelScope.launch {
-                        repository.prefetchSignedUrls(newFiles)
                     }
                 },
                 onFailure = { error ->
@@ -172,19 +175,22 @@ class GalleryViewModel @JvmOverloads constructor(
 
         viewModelScope.launch {
             val nextPage = state.currentPage + 1
-            val result = repository.listGalleryFiles(state.currentGallery, page = nextPage, itemsPerPage = 30)
+            val result = repository.listGalleryFiles(
+                state.currentGallery,
+                page = nextPage,
+                itemsPerPage = GalleryRepository.PAGE_SIZE
+            )
 
             result.fold(
                 onSuccess = { (newFiles, hasMore) ->
                     _uiState.update {
                         it.copy(
-                            galleryItems = it.galleryItems + newFiles,
+                            galleryItems = mergeGalleryPages(it.galleryItems, newFiles),
                             currentPage = nextPage,
                             hasMoreItems = hasMore,
                             isLoadingMore = false
                         )
                     }
-                    repository.prefetchSignedUrls(newFiles)
                 },
                 onFailure = {
                     _uiState.update { it.copy(isLoadingMore = false) }
