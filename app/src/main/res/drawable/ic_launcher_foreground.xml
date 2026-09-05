@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54">
+        <!-- Cloud outline/fill -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M69,45c-1.3,-6.9 -7.4,-12 -14.7,-12 -5.5,0 -10.3,2.9 -12.9,7.4 -1.1,-0.3 -2.2,-0.4 -3.4,-0.4 -6.6,0 -12,5.4 -12,12 0,0.5 0,1.1 0.1,1.6C21.7,55 18,59.8 18,65.5 18,72.4 23.6,78 30.5,78h38.2c6.2,0 11.3,-5.1 11.3,-11.3 0,-5.7 -4.2,-10.4 -9.8,-11.2 -0.3,-3.8 -1.7,-7.4 -4.2,-10.5z" />
+        <!-- Upload arrow inside cloud -->
+        <path
+            android:fillColor="#667EEA"
+            android:pathData="M54,46l-10,10h6v12h8V56h6z" />
+    </group>
+</vector>
