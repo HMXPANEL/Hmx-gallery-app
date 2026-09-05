@@ -53,13 +53,17 @@ class GalleryViewModel @JvmOverloads constructor(
             showToast("Gallery name too short.\nPlease enter at least 2 characters.", isError = true)
             return
         }
+        // Synchronously claim loading: repeated taps on Continue (button + IME
+        // Done) must not fire duplicate gallery-access/creation requests.
+        if (_uiState.value.isLoading) return
+        _uiState.update { it.copy(isLoading = true) }
         if (!SupabaseConfig.isConfigured) {
+            _uiState.update { it.copy(isLoading = false) }
             showToast(SupabaseConfig.missingConfigMessage(), isError = true)
             return
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
             val testResult = repository.testGalleryAccess(trimmed)
 
             testResult.fold(
