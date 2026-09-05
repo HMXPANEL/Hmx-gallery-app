@@ -58,10 +58,11 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Configure Supabase placeholders (.env)
-        # Optional: real values only if the repo owner sets these secrets.
+      - name: Configure Supabase credentials (.env)
+        # Real values only if the repo owner sets these secrets.
         # Otherwise the build falls back to .env.example placeholder defaults,
-        # which is sufficient to compile (SupabaseConfig has safe fallbacks).
+        # which still compiles (SupabaseConfig has safe fallbacks). Values are
+        # never echoed: GitHub masks secret values in logs automatically.
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
@@ -70,6 +71,23 @@ jobs:
             printf 'SUPABASE_URL=%s\nSUPABASE_ANON_KEY=%s\n' "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > .env
           else
             echo "No Supabase secrets configured; building with .env.example placeholder defaults."
+          fi
+
+      - name: Verify Supabase configuration presence
+        # Proves both keys reached the build environment without printing values
+        # (only key counts are echoed). Fails the run if secrets exist but .env
+        # was not created correctly.
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+            [ -f .env ] || { echo "::error::.env was not created from secrets"; exit 1; }
+            [ "$(grep -c '^SUPABASE_URL=' .env)" = "1" ] || { echo "::error::SUPABASE_URL missing from .env"; exit 1; }
+            [ "$(grep -c '^SUPABASE_ANON_KEY=' .env)" = "1" ] || { echo "::error::SUPABASE_ANON_KEY missing from .env"; exit 1; }
+            echo "Supabase configuration supplied via build environment (values masked by GitHub)."
+          else
+            echo "::warning::SUPABASE_URL/SUPABASE_ANON_KEY secrets are not set; APK uses placeholder defaults and reports a configuration error at runtime."
           fi
 
       - name: Run unit tests

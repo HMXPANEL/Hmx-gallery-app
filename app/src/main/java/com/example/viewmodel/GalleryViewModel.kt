@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.GalleryItem
 import com.example.data.preferences.GalleryPreferences
+import com.example.data.remote.SupabaseConfig
 import com.example.data.repository.GalleryRepository
 import com.example.utils.FileValidator
 import kotlinx.coroutines.Dispatchers
@@ -18,7 +19,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -37,30 +37,24 @@ class GalleryViewModel @JvmOverloads constructor(
     private var toastJob: Job? = null
 
     init {
-        checkSavedGallery()
+        startAtCloudGallery()
     }
 
-    private fun checkSavedGallery() {
-        viewModelScope.launch {
-            val savedName = preferences.savedGalleryName.firstOrNull()
-            if (!savedName.isNullOrBlank()) {
-                _uiState.update {
-                    it.copy(
-                        screen = AppScreen.Gallery,
-                        currentGallery = savedName
-                    )
-                }
-                loadGallery(clear = true)
-            } else {
-                _uiState.update { it.copy(screen = AppScreen.Setup) }
-            }
-        }
+    private fun startAtCloudGallery() {
+        // Cloud Gallery is always the entry point: never auto-restore the previous
+        // Gallery / Viewer / Upload screen. Persisted gallery data is left untouched
+        // (see GalleryPreferences) — only the entry destination is fixed.
+        _uiState.update { it.copy(screen = AppScreen.Setup) }
     }
 
     fun handleSetup(galleryName: String, onDone: (() -> Unit)? = null) {
         val trimmed = galleryName.trim()
         if (trimmed.length < 2) {
             showToast("Gallery name too short.\nPlease enter at least 2 characters.", isError = true)
+            return
+        }
+        if (!SupabaseConfig.isConfigured) {
+            showToast(SupabaseConfig.missingConfigMessage(), isError = true)
             return
         }
 
@@ -153,7 +147,13 @@ class GalleryViewModel @JvmOverloads constructor(
                             isLoadingMore = false
                         )
                     }
-                    showToast("Unable to load gallery.\nCheck your internet connection.", isError = true)
+                    // Missing credentials are a configuration error, not a network failure.
+                    // The message never contains secret values (see SupabaseConfig).
+                    if (SupabaseConfig.isConfigured) {
+                        showToast("Unable to load gallery.\nCheck your internet connection.", isError = true)
+                    } else {
+                        showToast(SupabaseConfig.missingConfigMessage(), isError = true)
+                    }
                 }
             )
         }

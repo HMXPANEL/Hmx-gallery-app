@@ -39,4 +39,11 @@ object SupabaseConfig {
      */
     val isConfigured: Boolean
         get() = url.startsWith("https://") && !url.contains("superbase url") && anonKey != "superbase api"
+
+    /**
+     * User-safe diagnostic for missing credentials.
+     * Names the expected build variables but never contains secret values.
+     */
+    fun missingConfigMessage(): String =
+        "Gallery service is not configured. Rebuild the app with SUPABASE_URL and SUPABASE_ANON_KEY."
 }

@@ -2,6 +2,7 @@ package com.example
 
 import com.example.data.model.GalleryItem
 import com.example.data.model.MediaType
+import com.example.data.remote.SupabaseConfig
 import com.example.utils.FileValidator
 import com.example.utils.SignedUrlCache
 import com.example.viewmodel.GalleryUiState
@@ -83,5 +84,13 @@ class GalleryBehaviorUnitTests {
         assertTrue(FileValidator.validateFile("a.jpg", 10 * 1024 * 1024L) is FileValidator.ValidationResult.Valid)
         val over = FileValidator.validateFile("a.jpg", 10 * 1024 * 1024L + 1)
         assertTrue(over is FileValidator.ValidationResult.Error)
+    }
+
+    @Test
+    fun `missing config diagnostic names variables but holds no credentials`() {
+        val message = SupabaseConfig.missingConfigMessage()
+        assertTrue(message.isNotBlank())
+        assertTrue(message.contains("SUPABASE_URL") && message.contains("SUPABASE_ANON_KEY"))
+        assertFalse(message.contains("eyJ")) // anon keys are JWTs; message must never embed one
     }
 }
